@@ -161,6 +161,7 @@ class GameInitializer {
   double handicapKomiInterpZeroProb;
   double sgfKomiInterpZeroProb;
   bool komiAuto;
+  bool antiGomokuMode;
 
   int numExtraBlackFixed;
   double noResultStdev;

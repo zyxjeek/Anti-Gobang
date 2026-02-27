@@ -16,6 +16,7 @@ Rules::Rules() {
   hasButton = false;
   whiteHandicapBonusRule = WHB_ZERO;
   friendlyPassOk = false;
+  antiGomoku = false;
   komi = 7.5f;
 }
 
@@ -27,7 +28,8 @@ Rules::Rules(
   bool button,
   int whbRule,
   bool pOk,
-  float km
+  float km,
+  bool anti
 )
   :koRule(kRule),
    scoringRule(sRule),
@@ -36,6 +38,7 @@ Rules::Rules(
    hasButton(button),
    whiteHandicapBonusRule(whbRule),
    friendlyPassOk(pOk),
+   antiGomoku(anti),
    komi(km)
 {}
 
@@ -51,6 +54,7 @@ bool Rules::operator==(const Rules& other) const {
     hasButton == other.hasButton &&
     whiteHandicapBonusRule == other.whiteHandicapBonusRule &&
     friendlyPassOk == other.friendlyPassOk &&
+    antiGomoku == other.antiGomoku &&
     komi == other.komi;
 }
 
@@ -63,6 +67,7 @@ bool Rules::operator!=(const Rules& other) const {
     hasButton != other.hasButton ||
     whiteHandicapBonusRule != other.whiteHandicapBonusRule ||
     friendlyPassOk != other.friendlyPassOk ||
+    antiGomoku != other.antiGomoku ||
     komi != other.komi;
 }
 
@@ -74,7 +79,8 @@ bool Rules::equalsIgnoringKomi(const Rules& other) const {
     multiStoneSuicideLegal == other.multiStoneSuicideLegal &&
     hasButton == other.hasButton &&
     whiteHandicapBonusRule == other.whiteHandicapBonusRule &&
-    friendlyPassOk == other.friendlyPassOk;
+    friendlyPassOk == other.friendlyPassOk &&
+    antiGomoku == other.antiGomoku;
 }
 
 bool Rules::gameResultWillBeInteger() const {
@@ -91,6 +97,7 @@ Rules Rules::getTrompTaylorish() {
   rules.hasButton = false;
   rules.whiteHandicapBonusRule = WHB_ZERO;
   rules.friendlyPassOk = false;
+  rules.antiGomoku = false;
   rules.komi = 7.5f;
   return rules;
 }
@@ -104,6 +111,7 @@ Rules Rules::getSimpleTerritory() {
   rules.hasButton = false;
   rules.whiteHandicapBonusRule = WHB_ZERO;
   rules.friendlyPassOk = false;
+  rules.antiGomoku = false;
   rules.komi = 7.5f;
   return rules;
 }
@@ -186,6 +194,8 @@ ostream& operator<<(ostream& out, const Rules& rules) {
     out << "whb" << Rules::writeWhiteHandicapBonusRule(rules.whiteHandicapBonusRule);
   if(rules.friendlyPassOk)
     out << "fpok" << rules.friendlyPassOk;
+  if(rules.antiGomoku)
+    out << "antiGomoku" << rules.antiGomoku;
   out << "komi" << rules.komi;
   return out;
 }
@@ -202,6 +212,8 @@ string Rules::toStringNoKomi() const {
     out << "whb" << Rules::writeWhiteHandicapBonusRule(whiteHandicapBonusRule);
   if(friendlyPassOk)
     out << "fpok" << friendlyPassOk;
+  if(antiGomoku)
+    out << "antiGomoku" << antiGomoku;
   return out.str();
 }
 
@@ -225,6 +237,8 @@ json Rules::toJsonHelper(bool omitKomi, bool omitDefaults) const {
     ret["whiteHandicapBonus"] = writeWhiteHandicapBonusRule(whiteHandicapBonusRule);
   if(!omitDefaults || friendlyPassOk != false)
     ret["friendlyPassOk"] = friendlyPassOk;
+  if(!omitDefaults || antiGomoku != false)
+    ret["antiGomoku"] = antiGomoku;
   if(!omitKomi)
     ret["komi"] = komi;
   return ret;
@@ -266,6 +280,7 @@ Rules Rules::updateRules(const string& k, const string& v, Rules oldRules) {
   else if(key == "hasButton") rules.hasButton = Global::stringToBool(value);
   else if(key == "whiteHandicapBonus") rules.whiteHandicapBonusRule = Rules::parseWhiteHandicapBonusRule(value);
   else if(key == "friendlyPassOk") rules.friendlyPassOk = Global::stringToBool(value);
+  else if(key == "antiGomoku" || key == "anti_gomoku") rules.antiGomoku = Global::stringToBool(value);
   else throw IOError("Unknown rules option: " + key);
   return rules;
 }
@@ -379,6 +394,20 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
     rules.friendlyPassOk = true;
     rules.komi = 7.5;
   }
+  else if(
+    lowercased == "antigomoku" || lowercased == "anti-gomoku" || lowercased == "anti_gomoku" || lowercased == "anti gomoku" ||
+    lowercased == "antigobang" || lowercased == "anti-gobang" || lowercased == "anti_gobang" || lowercased == "anti gobang"
+  ) {
+    rules.scoringRule = Rules::SCORING_AREA;
+    rules.koRule = Rules::KO_SIMPLE;
+    rules.taxRule = Rules::TAX_NONE;
+    rules.multiStoneSuicideLegal = true;
+    rules.hasButton = false;
+    rules.whiteHandicapBonusRule = Rules::WHB_ZERO;
+    rules.friendlyPassOk = false;
+    rules.antiGomoku = true;
+    rules.komi = 0.0;
+  }
   else if(sOrig.length() > 0 && sOrig[0] == '{') {
     //Default if not specified
     rules = Rules::getTrompTaylorish();
@@ -406,6 +435,8 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
           rules.whiteHandicapBonusRule = Rules::parseWhiteHandicapBonusRule(iter.value().get<string>());
         else if(key == "friendlyPassOk")
           rules.friendlyPassOk = iter.value().get<bool>();
+        else if(key == "antiGomoku")
+          rules.antiGomoku = iter.value().get<bool>();
         else if(key == "komi") {
           if(!allowKomi)
             throw IOError("Unknown rules option: " + key);
@@ -528,6 +559,12 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
         else throw IOError("Could not parse rules: " + sOrig);
         continue;
       }
+      if(startsWithAndStrip(s,"antiGomoku")) {
+        if(startsWithAndStrip(s,"1")) rules.antiGomoku = true;
+        else if(startsWithAndStrip(s,"0")) rules.antiGomoku = false;
+        else throw IOError("Could not parse rules: " + sOrig);
+        continue;
+      }
 
       //Unknown rules format
       else throw IOError("Could not parse rules: " + sOrig);
@@ -586,6 +623,8 @@ string Rules::toStringNoKomiMaybeNice() const {
     return "StoneScoring";
   if(equalsIgnoringKomi(parseRulesHelper("NewZealand",false)))
     return "NewZealand";
+  if(equalsIgnoringKomi(parseRulesHelper("AntiGomoku",false)))
+    return "AntiGomoku";
   return toStringNoKomi();
 }
 
@@ -618,3 +657,5 @@ const Hash128 Rules::ZOBRIST_BUTTON_HASH =   //Based on sha256 hash of Rules::ZO
 const Hash128 Rules::ZOBRIST_FRIENDLY_PASS_OK_HASH =   //Based on sha256 hash of Rules::ZOBRIST_FRIENDLY_PASS_OK_HASH
   Hash128(0x0113655998ef0a25ULL, 0x99c9d04ecd964874ULL);
 
+const Hash128 Rules::ZOBRIST_ANTI_GOMOKU_HASH =   //Based on sha256 hash of Rules::ZOBRIST_ANTI_GOMOKU_HASH
+  Hash128(0x8f8ded74af0817b5ULL, 0x3d903d78de69250eULL);

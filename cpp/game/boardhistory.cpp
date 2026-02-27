@@ -5,12 +5,16 @@
 using namespace std;
 
 static Hash128 getKoHash(const Rules& rules, const Board& board, Player pla, int encorePhase, Hash128 koRecapBlockHash) {
+  if(rules.antiGomoku)
+    return board.pos_hash ^ Board::ZOBRIST_PLAYER_HASH[pla];
   if(rules.koRule == Rules::KO_SITUATIONAL || rules.koRule == Rules::KO_SIMPLE || encorePhase > 0)
     return board.pos_hash ^ Board::ZOBRIST_PLAYER_HASH[pla] ^ koRecapBlockHash;
   else
     return board.pos_hash ^ koRecapBlockHash;
 }
 static Hash128 getKoHashAfterMoveNonEncore(const Rules& rules, Hash128 posHashAfterMove, Player pla) {
+  if(rules.antiGomoku)
+    return posHashAfterMove ^ Board::ZOBRIST_PLAYER_HASH[pla];
   if(rules.koRule == Rules::KO_SITUATIONAL || rules.koRule == Rules::KO_SIMPLE)
     return posHashAfterMove ^ Board::ZOBRIST_PLAYER_HASH[pla];
   else
@@ -22,6 +26,34 @@ static Hash128 getKoHashAfterMoveNonEncore(const Rules& rules, Hash128 posHashAf
 //   else
 //     return posHashAfterMove ^ koRecapBlockHashAfterMove;
 // }
+
+static bool antiGomokuHasFiveInRowThrough(const Board& board, Loc loc, Player pla) {
+  if(loc == Board::PASS_LOC || loc == Board::NULL_LOC || board.colors[loc] != pla)
+    return false;
+
+  const int dirs[4] = {1, board.x_size+1, board.x_size+2, board.x_size};
+  for(int i = 0; i<4; i++) {
+    int dir = dirs[i];
+    int count = 1;
+    Loc cur = loc + dir;
+    while(board.colors[cur] == pla) {
+      count++;
+      cur += dir;
+    }
+    cur = loc - dir;
+    while(board.colors[cur] == pla) {
+      count++;
+      cur -= dir;
+    }
+    if(count >= 5)
+      return true;
+  }
+  return false;
+}
+
+static bool antiGomokuBoardFull(const Board& board) {
+  return board.numStonesOnBoard() >= board.x_size * board.y_size;
+}
 
 
 BoardHistory::BoardHistory()
@@ -272,6 +304,8 @@ BoardHistory& BoardHistory::operator=(BoardHistory&& other) noexcept
 
 void BoardHistory::clear(const Board& board, Player pla, const Rules& r, int ePhase) {
   rules = r;
+  if(rules.antiGomoku)
+    ePhase = 0;
   moveHistory.clear();
   preventEncoreHistory.clear();
   koHashHistory.clear();
@@ -312,7 +346,7 @@ void BoardHistory::clear(const Board& board, Player pla, const Rules& r, int ePh
   koCapturesInEncore.clear();
   whiteBonusScore = 0.0f;
   whiteHandicapBonusScore = 0.0f;
-  hasButton = rules.hasButton && encorePhase == 0;
+  hasButton = !rules.antiGomoku && rules.hasButton && ePhase == 0;
   isPastNormalPhaseEnd = false;
   isGameFinished = false;
   winner = C_EMPTY;
@@ -335,7 +369,7 @@ void BoardHistory::clear(const Board& board, Player pla, const Rules& r, int ePh
   //Push hash for the new board state
   koHashHistory.push_back(getKoHash(rules,board,pla,encorePhase,koRecapBlockHash));
 
-  if(rules.scoringRule == Rules::SCORING_TERRITORY) {
+  if(!rules.antiGomoku && rules.scoringRule == Rules::SCORING_TERRITORY) {
     //Chill 1 point for every move played
     for(int y = 0; y<board.y_size; y++) {
       for(int x = 0; x<board.x_size; x++) {
@@ -711,6 +745,9 @@ void BoardHistory::endAndScoreGameNow(const Board& board) {
 }
 
 void BoardHistory::endGameIfAllPassAlive(const Board& board) {
+  if(rules.antiGomoku)
+    return;
+
   int boardScore = 0;
   bool nonPassAliveStones = false;
   bool safeBigTerritories = false;
@@ -772,6 +809,9 @@ bool BoardHistory::isLegal(const Board& board, Loc moveLoc, Player movePla) cons
   if(movePla != presumedNextMovePla)
     return false;
 
+  if(rules.antiGomoku)
+    return board.isLegalAntiGomoku(moveLoc,movePla);
+
   //Ko-moves in the encore that are recapture blocked are interpreted as pass-for-ko, so they are legal
   if(encorePhase > 0) {
     if(moveLoc >= 0 && moveLoc < Board::MAX_ARR_SIZE && moveLoc != Board::PASS_LOC) {
@@ -797,6 +837,8 @@ bool BoardHistory::isLegal(const Board& board, Loc moveLoc, Player movePla) cons
 }
 
 bool BoardHistory::isPassForKo(const Board& board, Loc moveLoc, Player movePla) const {
+  if(rules.antiGomoku)
+    return false;
   if(encorePhase > 0 && moveLoc >= 0 && moveLoc < Board::MAX_ARR_SIZE && moveLoc != Board::PASS_LOC) {
     if(board.colors[moveLoc] == getOpp(movePla) && koRecapBlocked[moveLoc] && board.getChainSize(moveLoc) == 1 && board.getNumLiberties(moveLoc) == 1)
       return true;
@@ -857,6 +899,8 @@ bool BoardHistory::wouldBeSpightlikeEndingPass(Player movePla, Hash128 koHashBef
 }
 
 bool BoardHistory::passWouldEndPhase(const Board& board, Player movePla) const {
+  if(rules.antiGomoku)
+    return false;
   Hash128 koHashBeforeMove = getKoHash(rules, board, movePla, encorePhase, koRecapBlockHash);
   if(newConsecutiveEndingPassesAfterPass() >= 2 ||
      wouldBeSpightlikeEndingPass(movePla,koHashBeforeMove))
@@ -865,6 +909,8 @@ bool BoardHistory::passWouldEndPhase(const Board& board, Player movePla) const {
 }
 
 bool BoardHistory::passWouldEndGame(const Board& board, Player movePla) const {
+  if(rules.antiGomoku)
+    return false;
   return passWouldEndPhase(board,movePla) && (
     rules.scoringRule == Rules::SCORING_AREA
     || (rules.scoringRule == Rules::SCORING_TERRITORY && encorePhase >= 2)
@@ -872,6 +918,8 @@ bool BoardHistory::passWouldEndGame(const Board& board, Player movePla) const {
 }
 
 bool BoardHistory::shouldSuppressEndGameFromFriendlyPass(const Board& board, Player movePla) const {
+  if(rules.antiGomoku)
+    return false;
   return rules.friendlyPassOk &&
     rules.scoringRule == Rules::SCORING_AREA &&
     newConsecutiveEndingPassesAfterPass() == 2 &&
@@ -879,6 +927,8 @@ bool BoardHistory::shouldSuppressEndGameFromFriendlyPass(const Board& board, Pla
 }
 
 bool BoardHistory::isFinalPhase() const {
+  if(rules.antiGomoku)
+    return true;
   return
     rules.scoringRule == Rules::SCORING_AREA
     || (rules.scoringRule == Rules::SCORING_TERRITORY && encorePhase >= 2);
@@ -888,6 +938,8 @@ bool BoardHistory::isLegalTolerant(const Board& board, Loc moveLoc, Player moveP
   // Allow either side to move during tolerant play, but still check that a player is specified
   if(movePla != P_BLACK && movePla != P_WHITE)
     return false;
+  if(rules.antiGomoku)
+    return board.isLegalAntiGomoku(moveLoc,movePla);
   bool multiStoneSuicideLegal = true; // Tolerate suicide regardless of rules
   if(!isPassForKo(board, moveLoc, movePla) && !board.isLegalIgnoringKo(moveLoc,movePla,multiStoneSuicideLegal))
     return false;
@@ -897,6 +949,12 @@ bool BoardHistory::makeBoardMoveTolerant(Board& board, Loc moveLoc, Player moveP
   // Allow either side to move during tolerant play, but still check that a player is specified
   if(movePla != P_BLACK && movePla != P_WHITE)
     return false;
+  if(rules.antiGomoku) {
+    if(!board.isLegalAntiGomoku(moveLoc,movePla))
+      return false;
+    makeBoardMoveAssumeLegal(board,moveLoc,movePla,NULL);
+    return true;
+  }
   bool multiStoneSuicideLegal = true; // Tolerate suicide regardless of rules
   if(!isPassForKo(board, moveLoc, movePla) && !board.isLegalIgnoringKo(moveLoc,movePla,multiStoneSuicideLegal))
     return false;
@@ -907,6 +965,12 @@ bool BoardHistory::makeBoardMoveTolerant(Board& board, Loc moveLoc, Player moveP
   // Allow either side to move during tolerant play, but still check that a player is specified
   if(movePla != P_BLACK && movePla == presumedNextMovePla && movePla != P_WHITE)
     return false;
+  if(rules.antiGomoku) {
+    if(!board.isLegalAntiGomoku(moveLoc,movePla))
+      return false;
+    makeBoardMoveAssumeLegal(board,moveLoc,movePla,NULL,preventEncore);
+    return true;
+  }
   bool multiStoneSuicideLegal = true; // Tolerate suicide regardless of rules
   if(!isPassForKo(board, moveLoc, movePla) && !board.isLegalIgnoringKo(moveLoc,movePla,multiStoneSuicideLegal))
     return false;
@@ -939,6 +1003,51 @@ void BoardHistory::makeBoardMoveAssumeLegal(Board& board, Loc moveLoc, Player mo
   isScored = false;
   isNoResult = false;
   isResignation = false;
+
+  if(rules.antiGomoku) {
+    if(board.isLegalAntiGomoku(moveLoc,movePla))
+      board.playMoveAssumeLegalAntiGomoku(moveLoc,movePla);
+
+    currentRecentBoardIdx = (currentRecentBoardIdx + 1) % NUM_RECENT_BOARDS;
+    recentBoards[currentRecentBoardIdx] = board;
+
+    koHashHistory.push_back(getKoHash(rules,board,getOpp(movePla),encorePhase,koRecapBlockHash));
+    moveHistory.push_back(Move(moveLoc,movePla));
+    preventEncoreHistory.push_back(preventEncore);
+    numTurnsThisPhase += 1;
+    numApproxValidTurnsThisPhase += 1;
+    numConsecValidTurnsThisGame += 1;
+    presumedNextMovePla = getOpp(movePla);
+    if(moveIsIllegal)
+      numConsecValidTurnsThisGame = 0;
+
+    if(moveLoc != Board::PASS_LOC)
+      wasEverOccupiedOrPlayed[moveLoc] = true;
+
+    consecutiveEndingPasses = 0;
+    hashesBeforeBlackPass.clear();
+    hashesBeforeWhitePass.clear();
+    std::fill(superKoBanned, superKoBanned+Board::MAX_ARR_SIZE, false);
+
+    if(moveLoc != Board::PASS_LOC && antiGomokuHasFiveInRowThrough(board,moveLoc,movePla)) {
+      winner = getOpp(movePla);
+      finalWhiteMinusBlackScore = (winner == P_WHITE ? 1.0f : -1.0f);
+      isScored = true;
+      isNoResult = false;
+      isResignation = false;
+      isGameFinished = true;
+    }
+    else if(antiGomokuBoardFull(board)) {
+      winner = C_EMPTY;
+      finalWhiteMinusBlackScore = 0.0f;
+      isScored = true;
+      isNoResult = false;
+      isResignation = false;
+      isGameFinished = true;
+    }
+
+    return;
+  }
 
   //Update consecutiveEndingPasses and button
   bool isSpightlikeEndingPass = false;
@@ -1263,6 +1372,8 @@ Hash128 BoardHistory::getSituationRulesAndKoHash(const Board& board, const Board
     hash ^= Rules::ZOBRIST_BUTTON_HASH;
   if(hist.rules.friendlyPassOk)
     hash ^= Rules::ZOBRIST_FRIENDLY_PASS_OK_HASH;
+  if(hist.rules.antiGomoku)
+    hash ^= Rules::ZOBRIST_ANTI_GOMOKU_HASH;
 
   return hash;
 }

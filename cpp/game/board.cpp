@@ -462,6 +462,18 @@ bool Board::isLegal(Loc loc, Player pla, bool isMultiStoneSuicideLegal) const
   );
 }
 
+bool Board::isLegalAntiGomoku(Loc loc, Player pla) const
+{
+  if(pla != P_BLACK && pla != P_WHITE)
+    return false;
+  return (
+    loc != PASS_LOC &&
+    loc >= 0 &&
+    loc < MAX_ARR_SIZE &&
+    colors[loc] == C_EMPTY
+  );
+}
+
 //Check if moving here is illegal, ignoring simple ko
 bool Board::isLegalIgnoringKo(Loc loc, Player pla, bool isMultiStoneSuicideLegal) const
 {
@@ -1090,6 +1102,52 @@ void Board::playMoveAssumeLegal(Loc loc, Player pla)
     else
       numWhiteCaptures += numSuicided;
   }
+}
+
+void Board::playMoveAssumeLegalAntiGomoku(Loc loc, Player pla)
+{
+  assert(isLegalAntiGomoku(loc,pla));
+
+  Player opp = getOpp(pla);
+
+  colors[loc] = pla;
+  pos_hash ^= ZOBRIST_BOARD_HASH[loc][pla];
+  chain_data[loc].owner = pla;
+  chain_data[loc].num_locs = 1;
+  chain_data[loc].num_liberties = getNumImmediateLiberties(loc);
+  chain_head[loc] = loc;
+  next_in_chain[loc] = loc;
+
+  int num_opps_seen = 0;
+  Loc opp_heads_seen[4];
+
+  for(int i = 0; i < 4; i++) {
+    int adj = loc + adj_offsets[i];
+
+    if(colors[adj] == pla) {
+      if(chain_head[adj] == chain_head[loc])
+        continue;
+      chain_data[chain_head[adj]].num_liberties--;
+      mergeChains(adj,loc);
+    }
+    else if(colors[adj] == opp) {
+      Loc opp_head = chain_head[adj];
+      bool seen = false;
+      for(int j = 0; j<num_opps_seen; j++) {
+        if(opp_heads_seen[j] == opp_head) {
+          seen = true;
+          break;
+        }
+      }
+      if(seen)
+        continue;
+
+      chain_data[opp_head].num_liberties--;
+      opp_heads_seen[num_opps_seen++] = opp_head;
+    }
+  }
+
+  ko_loc = NULL_LOC;
 }
 
 int Board::getNumImmediateLiberties(Loc loc) const

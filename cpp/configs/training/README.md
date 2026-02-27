@@ -15,3 +15,10 @@ These configs are roughly in order from configs used *early* in KataGo's runs wi
 
 * `gatekeeper*.cfg` - These configs are loosely analogous to some of the above except used for the gatekeeper. Unlike selfplay configs, these aren't very important, since pretty much any reasonable config will distinguish between significantly better and worse nets in a training run. Also, runs work fine and often are more efficient without a gatekeeper at all, although a gatekeeper can be nice when starting out a run to help debugging and make sure that nets are actually improving.
 
+#### Anti-gomoku training mode
+
+For anti-gomoku self-play, set `antiGomoku = true` in your self-play config. This forces:
+
+* 9x9 board size
+* anti-gomoku rules (no pass, no captures, making >=5 in a row loses)
+* no handicap/komi randomization extras used for Go training

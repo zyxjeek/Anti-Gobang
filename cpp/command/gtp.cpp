@@ -108,6 +108,8 @@ static const vector<string> knownCommands = {
   "stop",
 };
 
+static constexpr int ANTI_GOMOKU_BOARD_LEN = 9;
+
 static bool tryParseLoc(const string& s, const Board& b, Loc& loc) {
   return Location::tryOfString(s,b,loc);
 }
@@ -462,6 +464,11 @@ struct GTPEngine {
       boardYSize = Board::DEFAULT_LEN;
       wasDefault = true;
     }
+    if(currentRules.antiGomoku) {
+      boardXSize = ANTI_GOMOKU_BOARD_LEN;
+      boardYSize = ANTI_GOMOKU_BOARD_LEN;
+      wasDefault = false;
+    }
 
     bool defaultRequireExactNNLen = true;
     int nnXLen = boardXSize;
@@ -600,7 +607,22 @@ struct GTPEngine {
     int newXSize = bot->getRootBoard().x_size;
     int newYSize = bot->getRootBoard().y_size;
     Board board(newXSize,newYSize);
-    bool suc = board.setStonesFailIfNoLibs(initialStones);
+    bool suc = false;
+    if(currentRules.antiGomoku) {
+      suc = true;
+      for(int i = 0; i<(int)initialStones.size(); i++) {
+        Loc loc = initialStones[i].loc;
+        Player pla = initialStones[i].pla;
+        if(!board.isLegalAntiGomoku(loc,pla)) {
+          suc = false;
+          break;
+        }
+        board.playMoveAssumeLegalAntiGomoku(loc,pla);
+      }
+    }
+    else {
+      suc = board.setStonesFailIfNoLibs(initialStones);
+    }
     if(!suc)
       return false;
 
@@ -669,6 +691,11 @@ struct GTPEngine {
     assert(nnEval != NULL);
     assert(bot->getRootHist().rules == currentRules);
     newRules.komi = currentRules.komi;
+
+    if(newRules.antiGomoku && (initialBoard.x_size != ANTI_GOMOKU_BOARD_LEN || initialBoard.y_size != ANTI_GOMOKU_BOARD_LEN)) {
+      error = "AntiGomoku requires a 9x9 board. Please run 'boardsize 9' first.";
+      return false;
+    }
 
     bool rulesWereSupported;
     nnEval->getSupportedRules(newRules,rulesWereSupported);
@@ -1206,7 +1233,8 @@ struct GTPEngine {
     recentWinLossValues.push_back(winLossValue);
 
     //Decide whether we should resign---------------------
-    bool resigned = gargs.allowResignation && shouldResign(
+    bool antiGomoku = search->getRootHist().rules.antiGomoku;
+    bool resigned = !antiGomoku && gargs.allowResignation && shouldResign(
       search->getRootBoard(),search->getRootHist(),pla,recentWinLossValues,lead,
       gargs.resignThreshold,gargs.resignConsecTurns,gargs.resignMinScoreDifference,gargs.resignMinMovesPerBoardArea
     );
@@ -1260,12 +1288,14 @@ struct GTPEngine {
 
     //Implement friendly pass - in area scoring rules other than tromp-taylor, maybe pass once there are no points
     //left to gain.
-    int64_t numVisitsForFriendlyPass = 8 + std::min((int64_t)1000, std::min(params.maxVisits, params.maxPlayouts) / 10);
-    moveLoc = PlayUtils::maybeFriendlyPass(gargs.cleanupBeforePass, gargs.friendlyPass, pla, moveLoc, searchBot, numVisitsForFriendlyPass);
+    if(!antiGomoku) {
+      int64_t numVisitsForFriendlyPass = 8 + std::min((int64_t)1000, std::min(params.maxVisits, params.maxPlayouts) / 10);
+      moveLoc = PlayUtils::maybeFriendlyPass(gargs.cleanupBeforePass, gargs.friendlyPass, pla, moveLoc, searchBot, numVisitsForFriendlyPass);
 
-    //Implement cleanupBeforePass hack - if the bot wants to pass, instead cleanup if there is something to clean
-    //and we are in a ruleset where this is necessary or the user has configured it.
-    moveLoc = PlayUtils::maybeCleanupBeforePass(gargs.cleanupBeforePass, gargs.friendlyPass, pla, moveLoc, bot);
+      //Implement cleanupBeforePass hack - if the bot wants to pass, instead cleanup if there is something to clean
+      //and we are in a ruleset where this is necessary or the user has configured it.
+      moveLoc = PlayUtils::maybeCleanupBeforePass(gargs.cleanupBeforePass, gargs.friendlyPass, pla, moveLoc, bot);
+    }
 
     //Actual reporting of chosen move---------------------
     if(resigned)
@@ -2313,6 +2343,10 @@ int MainCmds::gtp(const vector<string>& args) {
         responseIsError = true;
         response = Global::strprintf("unacceptable size (Board::MAX_LEN is %d, consider increasing and recompiling)",(int)Board::MAX_LEN);
       }
+      else if(engine->getCurrentRules().antiGomoku && (newXSize != ANTI_GOMOKU_BOARD_LEN || newYSize != ANTI_GOMOKU_BOARD_LEN)) {
+        responseIsError = true;
+        response = "AntiGomoku requires boardsize 9";
+      }
       else {
         engine->setOrResetBoardSize(cfg,logger,seedRand,newXSize,newYSize,logger.isLoggingToStderr());
       }
@@ -3137,6 +3171,10 @@ int MainCmds::gtp(const vector<string>& args) {
         responseIsError = true;
         response = "Number of handicap stones less than 2: '" + pieces[0] + "'";
       }
+      else if(engine->getCurrentRules().antiGomoku) {
+        responseIsError = true;
+        response = "Handicap commands are not supported in AntiGomoku";
+      }
       else if(!engine->bot->getRootBoard().isEmpty()) {
         responseIsError = true;
         response = "Board is not empty";
@@ -3161,6 +3199,10 @@ int MainCmds::gtp(const vector<string>& args) {
         responseIsError = true;
         response = "Number of handicap stones less than 2: '" + pieces[0] + "'";
       }
+      else if(engine->getCurrentRules().antiGomoku) {
+        responseIsError = true;
+        response = "Handicap commands are not supported in AntiGomoku";
+      }
       else if(!engine->bot->getRootBoard().isEmpty()) {
         responseIsError = true;
         response = "Board is not empty";
@@ -3172,7 +3214,11 @@ int MainCmds::gtp(const vector<string>& args) {
     }
 
     else if(command == "set_free_handicap") {
-      if(!engine->bot->getRootBoard().isEmpty()) {
+      if(engine->getCurrentRules().antiGomoku) {
+        responseIsError = true;
+        response = "Handicap commands are not supported in AntiGomoku";
+      }
+      else if(!engine->bot->getRootBoard().isEmpty()) {
         responseIsError = true;
         response = "Board is not empty";
       }

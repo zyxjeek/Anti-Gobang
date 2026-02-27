@@ -35,6 +35,8 @@ struct Rules {
   //high level, use this info to adjust passing behavior - whether it's okay to pass without capturing dead stones.
   //Only relevant for area scoring.
   bool friendlyPassOk;
+  // If true, use anti-gomoku rules: no pass, no captures, making >=5 in a row loses.
+  bool antiGomoku;
 
   float komi;
   //Min and max acceptable komi in various places involving user input validation
@@ -50,7 +52,8 @@ struct Rules {
     bool hasButton,
     int whiteHandicapBonusRule,
     bool friendlyPassOk,
-    float komi
+    float komi,
+    bool antiGomoku = false
   );
   ~Rules();
 
@@ -102,6 +105,7 @@ struct Rules {
   static const Hash128 ZOBRIST_MULTI_STONE_SUICIDE_HASH;
   static const Hash128 ZOBRIST_BUTTON_HASH;
   static const Hash128 ZOBRIST_FRIENDLY_PASS_OK_HASH;
+  static const Hash128 ZOBRIST_ANTI_GOMOKU_HASH;
 
 private:
   nlohmann::json toJsonHelper(bool omitKomi, bool omitDefaults) const;

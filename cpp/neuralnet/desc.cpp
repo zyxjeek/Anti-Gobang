@@ -1854,6 +1854,11 @@ void ModelDesc::loadFromFileMaybeGZipped(const string& fileName, ModelDesc& desc
 
 
 Rules ModelDesc::getSupportedRules(const Rules& desiredRules, bool& supported) const {
+  if(desiredRules.antiGomoku) {
+    supported = true;
+    return desiredRules;
+  }
+
   Rules rules = desiredRules;
   supported = true;
   if(modelVersion <= 6) {

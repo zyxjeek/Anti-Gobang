@@ -187,6 +187,8 @@ struct Board
   bool isLegalIgnoringKo(Loc loc, Player pla, bool isMultiStoneSuicideLegal) const;
   //Check if moving here is legal. Equivalent to isLegalIgnoringKo && !isKoBanned
   bool isLegal(Loc loc, Player pla, bool isMultiStoneSuicideLegal) const;
+  //Check legal move for anti-gomoku mode (no pass, only empty intersections).
+  bool isLegalAntiGomoku(Loc loc, Player pla) const;
   //Check if this location is on the board
   bool isOnBoard(Loc loc) const;
   //Check if this location contains a simple eye for the specified player.
@@ -238,6 +240,8 @@ struct Board
 
   //Plays the specified move, assuming it is legal.
   void playMoveAssumeLegal(Loc loc, Player pla);
+  //Plays the specified move in anti-gomoku mode, assuming it is legal.
+  void playMoveAssumeLegalAntiGomoku(Loc loc, Player pla);
 
   //Plays the specified move, assuming it is legal, and returns a MoveRecord for the move
   MoveRecord playMoveRecorded(Loc loc, Player pla);

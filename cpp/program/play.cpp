@@ -99,6 +99,9 @@ void GameInitializer::initShared(ConfigParser& cfg, Logger& logger) {
   allowedTaxRuleStrs = cfg.getStrings("taxRules", Rules::taxRuleStrings());
   allowedMultiStoneSuicideLegals = cfg.getBools("multiStoneSuicideLegals");
   allowedButtons = cfg.getBools("hasButtons");
+  antiGomokuMode =
+    (cfg.contains("antiGomoku") && cfg.getBool("antiGomoku")) ||
+    (cfg.contains("anti_gomoku") && cfg.getBool("anti_gomoku"));
 
   for(size_t i = 0; i < allowedKoRuleStrs.size(); i++)
     allowedKoRules.push_back(Rules::parseKoRule(allowedKoRuleStrs[i]));
@@ -357,6 +360,19 @@ void GameInitializer::initShared(ConfigParser& cfg, Logger& logger) {
   if(allowedBSizes.size() != allowedBSizeRelProbs.size())
     throw IOError("bSizes or bSizesXY and bSizeRelProbs must have same number of values in " + cfg.getFileName());
 
+  if(antiGomokuMode) {
+    allowedBSizes.clear();
+    allowedBSizes.push_back(std::make_pair(9,9));
+    allowedBSizeRelProbs.clear();
+    allowedBSizeRelProbs.push_back(1.0);
+    startPoses.clear();
+    startPosCumProbs.clear();
+    startPosesProb = 0.0;
+    hintPoses.clear();
+    hintPosCumProbs.clear();
+    hintPosesProb = 0.0;
+  }
+
   minBoardXSize = allowedBSizes[0].first;
   minBoardYSize = allowedBSizes[0].second;
   maxBoardXSize = allowedBSizes[0].first;
@@ -377,6 +393,18 @@ void GameInitializer::initShared(ConfigParser& cfg, Logger& logger) {
   noResultStdev = cfg.contains("noResultStdev") ? cfg.getDouble("noResultStdev",0.0,1.0) : 0.0;
   numExtraBlackFixed = cfg.contains("numExtraBlackFixed") ? cfg.getInt("numExtraBlackFixed",1,18) : 0;
   drawRandRadius = cfg.contains("drawRandRadius") ? cfg.getDouble("drawRandRadius",0.0,1.0) : 0.0;
+  if(antiGomokuMode) {
+    komiMean = 0.0f;
+    komiStdev = 0.0f;
+    handicapProb = 0.0;
+    handicapCompensateKomiProb = 0.0;
+    forkCompensateKomiProb = 0.0;
+    sgfCompensateKomiProb = 0.0;
+    handicapKomiInterpZeroProb = 0.0;
+    sgfKomiInterpZeroProb = 0.0;
+    komiAuto = false;
+    numExtraBlackFixed = 0;
+  }
 }
 
 GameInitializer::~GameInitializer()
@@ -427,6 +455,9 @@ void GameInitializer::createGame(
 }
 
 Rules GameInitializer::randomizeScoringAndTaxRules(Rules rules, Rand& randToUse) const {
+  if(antiGomokuMode)
+    return rules;
+
   rules.scoringRule = allowedScoringRules[randToUse.nextUInt((uint32_t)allowedScoringRules.size())];
   rules.taxRule = allowedTaxRules[randToUse.nextUInt((uint32_t)allowedTaxRules.size())];
 
@@ -466,6 +497,12 @@ Rules GameInitializer::createRules() {
 }
 
 Rules GameInitializer::createRulesUnsynchronized() {
+  if(antiGomokuMode) {
+    Rules rules = Rules::parseRules("anti-gomoku");
+    rules.komi = 0.0f;
+    return rules;
+  }
+
   Rules rules;
   rules.koRule = allowedKoRules[rand.nextUInt((uint32_t)allowedKoRules.size())];
   rules.scoringRule = allowedScoringRules[rand.nextUInt((uint32_t)allowedScoringRules.size())];
@@ -611,6 +648,15 @@ void GameInitializer::createGameSharedUnsynchronized(
     otherGameProps.trainingWeight = 1.0;
     makeGameFairProb = extraBlackAndKomi.extraBlack > 0 ? handicapCompensateKomiProb : 0.0;
     extraBlackAndKomi.interpZero = (handicapKomiInterpZeroProb > 0 && extraBlackAndKomi.extraBlack > 0) ? rand.nextBool(handicapKomiInterpZeroProb) : false;
+  }
+
+  if(rules.antiGomoku) {
+    extraBlackAndKomi.extraBlack = 0;
+    extraBlackAndKomi.komiMean = 0.0f;
+    extraBlackAndKomi.komiStdev = 0.0f;
+    extraBlackAndKomi.makeGameFair = false;
+    extraBlackAndKomi.makeGameFairForEmptyBoard = false;
+    extraBlackAndKomi.interpZero = false;
   }
 
   double asymmetricProb = (extraBlackAndKomi.extraBlack > 0) ? playSettings.handicapAsymmetricPlayoutProb : playSettings.normalAsymmetricPlayoutProb;
@@ -787,7 +833,7 @@ static void logSearch(Search* bot, Logger& logger, Loc loc, OtherGameProperties 
 
 static Loc chooseRandomForkingMove(const NNOutput* nnOutput, const Board& board, const BoardHistory& hist, Player pla, Rand& gameRand, Loc banMove) {
   double r = gameRand.nextDouble();
-  bool allowPass = true;
+  bool allowPass = !hist.rules.antiGomoku;
   //70% of the time, do a random temperature 1 policy move
   if(r < 0.70)
     return PlayUtils::chooseRandomPolicyMove(nnOutput, board, hist, pla, gameRand, 1.0, allowPass, banMove);
@@ -1422,7 +1468,7 @@ FinishedGameData* Play::runGame(
     }
   };
 
-  if(playSettings.initGamesWithPolicy && otherGameProps.allowPolicyInit && !hist.isGameFinished) {
+  if(playSettings.initGamesWithPolicy && otherGameProps.allowPolicyInit && !hist.isGameFinished && !hist.rules.antiGomoku) {
     double proportionOfBoardArea = otherGameProps.isSgfPos ? playSettings.startPosesPolicyInitAreaProp : playSettings.policyInitAreaProp;
     if(proportionOfBoardArea > 0) {
       //Perform the initialization using a different noised komi, to get a bit of opening policy mixing across komi
@@ -1504,7 +1550,7 @@ FinishedGameData* Play::runGame(
 
   //Main play loop
   for(int i = 0; i<maxMovesPerGame; i++) {
-    if(doEndGameIfAllPassAlive)
+    if(doEndGameIfAllPassAlive && !hist.rules.antiGomoku)
       hist.endGameIfAllPassAlive(board);
     if(hist.isGameFinished)
       break;
@@ -1654,7 +1700,7 @@ FinishedGameData* Play::runGame(
     hist.makeBoardMoveAssumeLegal(board,loc,pla,NULL);
 
     //Check for resignation
-    if(playSettings.allowResignation && historicalMctsWinLossValues.size() >= playSettings.resignConsecTurns) {
+    if(playSettings.allowResignation && !hist.rules.antiGomoku && historicalMctsWinLossValues.size() >= playSettings.resignConsecTurns) {
       //Play at least some moves no matter what
       int minTurnForResignation = 1 + board.x_size * board.y_size / 5;
       if(i >= minTurnForResignation) {
