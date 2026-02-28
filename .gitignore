@@ -21,7 +21,9 @@ cpp/main
 cpp/maincuda
 cpp/mainopencl
 cpp/katago
-cpp/configs
+# Keep tracked example configs under version control
+!cpp/configs/
+!cpp/configs/**
 cpp/evalsgf
 cpp/run*.sh
 cpp/tests/scratch
@@ -65,6 +67,8 @@ CMakeCache.txt
 CMakeFiles/
 Makefile
 cmake_install.cmake
+build/
+compile_commands.json
 
 .DS_Store
 GPATH
@@ -80,6 +84,23 @@ watchgame.txt
 models/
 python/startposesupload.txt
 for_release/
+
+# Local python environments
+.venv/
+venv/
+
+# Selfplay/training outputs
+/selfplay/
+/shufflescratch/
+/shuffleddata/
+/torchmodels_toexport/
+/torchmodels_toexport_extra/
+/modelstobetested/
+/models_extra/
+/rejectedmodels/
+/gatekeepersgf/
+/train/
+/logs/
 
 tests/results/matchsgfs/
 tests/results/matchsgfs2/

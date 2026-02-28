@@ -2366,8 +2366,9 @@ void Board::checkConsistency() const {
       throw StringError(errLabel + "Chain data num_locs does not match actual stone count");
     if(data.num_liberties > pseudoLibs)
       throw StringError(errLabel + "Chain data liberties exceeds pseudoliberties");
-    if(data.num_liberties <= 0)
-      throw StringError(errLabel + "Chain data liberties is nonpositive");
+    // Anti-gomoku mode can legally produce zero-liberty chains since there are no captures.
+    if(data.num_liberties < 0)
+      throw StringError(errLabel + "Chain data liberties is negative");
 
     int numFoundLibs = findLiberties(loc,buf,0,0);
     if(numFoundLibs != data.num_liberties)
